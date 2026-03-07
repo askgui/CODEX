@@ -5,6 +5,8 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
+    routing::get,
+    routing::post,
     Json, Router,
 };
 use reqwest::Client;
@@ -17,6 +19,8 @@ use crate::{
     models::{
         ActionResponse, ApiErrorResponse, HealthResponse, ImportItem, ImportRequest,
         ImportResponse, ImportsListResponse, StatsResponse,
+        ApiErrorResponse, HealthResponse, ImportItem, ImportRequest, ImportResponse,
+        ImportsListResponse,
     },
 };
 
@@ -42,6 +46,9 @@ pub fn router(state: AppState) -> Router {
             "/imports/:id",
             get(get_import_by_id).delete(delete_import_by_id),
         )
+        .route("/import", post(import))
+        .route("/imports", get(list_imports))
+        .route("/imports/:id", get(get_import_by_id))
         .with_state(state)
 }
 
