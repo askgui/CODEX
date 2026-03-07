@@ -4,6 +4,21 @@ const importButton = document.getElementById("import");
 const refreshButton = document.getElementById("refresh");
 const countEl = document.getElementById("count");
 const apiBadgeEl = document.getElementById("api-badge");
+const statTotalEl = document.getElementById("stat-total");
+const statParsedEl = document.getElementById("stat-parsed");
+const statDownloadedEl = document.getElementById("stat-downloaded");
+const statFailedEl = document.getElementById("stat-failed");
+const playerEl = document.getElementById("audio-player");
+const nowPlayingEl = document.getElementById("now-playing");
+const statusFilterEl = document.getElementById("status-filter");
+const prevPageEl = document.getElementById("prev-page");
+const nextPageEl = document.getElementById("next-page");
+const pageLabelEl = document.getElementById("page-label");
+const searchInputEl = document.getElementById("search-input");
+
+const PAGE_LIMIT = 10;
+let currentOffset = 0;
+let hasMore = false;
 
 function escapeHtml(value) {
   return String(value)
@@ -33,6 +48,20 @@ function setApiBadge(state) {
   }
 }
 
+function setStats(stats = {}) {
+  statTotalEl.textContent = String(stats.total || 0);
+  statParsedEl.textContent = String(stats.parsed || 0);
+  statDownloadedEl.textContent = String(stats.downloaded || 0);
+  statFailedEl.textContent = String(stats.failed || 0);
+}
+
+function updatePager() {
+  const page = Math.floor(currentOffset / PAGE_LIMIT) + 1;
+  pageLabelEl.textContent = `Página ${page}`;
+  prevPageEl.disabled = currentOffset === 0;
+  nextPageEl.disabled = !hasMore;
+}
+
 function isValidSunoSongUrl(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
@@ -52,13 +81,13 @@ function statusTag(status) {
   return map[status] || { cls: "tag--parsed", label: escapeHtml(status || "unknown") };
 }
 
-function renderImports(items) {
-  countEl.textContent = String(items?.length || 0);
+function renderImports(items, total) {
+  countEl.textContent = String(total ?? (items?.length || 0));
   importsEl.innerHTML = "";
 
   if (!items?.length) {
     const li = document.createElement("li");
-    li.textContent = "Nenhum import registrado ainda.";
+    li.textContent = "Nenhum import registrado para este filtro.";
     importsEl.appendChild(li);
     return;
   }
@@ -68,10 +97,34 @@ function renderImports(items) {
     const title = escapeHtml(item.title || "(sem título)");
     const tag = statusTag(item.status);
     const local = item.local_audio_path ? "🎵" : "";
+    const playButton = item.local_audio_path
+      ? `<button class="btn-play" data-play-id="${item.id}" data-play-title="${title}" title="Ouvir faixa">Ouvir</button>`
+      : "";
 
-    li.innerHTML = `<span class="tag ${tag.cls}">${tag.label}</span>${title} ${local}`;
+    li.innerHTML = `
+      <div class="import-item-row">
+        <span class="import-text"><span class="tag ${tag.cls}">${tag.label}</span>${title} ${local}</span>
+        <div class="import-actions">
+          ${playButton}
+          <button class="btn-remove" data-id="${item.id}" title="Remover import">Remover</button>
+        </div>
+      </div>
+    `;
     li.title = `${item.source_url}\n${item.created_at}${item.error_message ? `\nErro: ${item.error_message}` : ""}`;
     importsEl.appendChild(li);
+  }
+}
+
+async function playImport(id, title) {
+  const streamUrl = `http://localhost:7878/imports/${id}/audio`;
+  playerEl.src = streamUrl;
+  nowPlayingEl.textContent = title || `import #${id}`;
+
+  try {
+    await playerEl.play();
+    setStatus("Reproduzindo áudio local.");
+  } catch {
+    setStatus("Não foi possível reproduzir o áudio local.", false);
   }
 }
 
@@ -84,11 +137,31 @@ async function checkHealth() {
   }
 }
 
+async function loadStats() {
+  try {
+    const response = await fetch("http://localhost:7878/stats");
+    if (!response.ok) return;
+    const body = await response.json().catch(() => ({}));
+    setStats(body);
+  } catch {
+    // best effort
+  }
+}
+
 async function loadRecentImports() {
   refreshButton.disabled = true;
 
   try {
-    const response = await fetch("http://localhost:7878/imports?limit=10");
+    const status = statusFilterEl.value;
+    const params = new URLSearchParams({
+      limit: String(PAGE_LIMIT),
+      offset: String(currentOffset)
+    });
+    if (status) params.set("status", status);
+    const search = searchInputEl.value.trim();
+    if (search) params.set("q", search);
+
+    const response = await fetch(`http://localhost:7878/imports?${params.toString()}`);
 
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -98,7 +171,9 @@ async function loadRecentImports() {
     }
 
     const body = await response.json();
-    renderImports(body.items || []);
+    hasMore = Boolean(body.has_more);
+    renderImports(body.items || [], body.total);
+    updatePager();
     setApiBadge("ok");
   } catch {
     setStatus("API local indisponível para listar imports.", false);
@@ -107,6 +182,73 @@ async function loadRecentImports() {
     refreshButton.disabled = false;
   }
 }
+
+async function deleteImportById(id) {
+  try {
+    const response = await fetch(`http://localhost:7878/imports/${id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      setStatus(body.message || "Falha ao remover import.", false);
+      return;
+    }
+
+    setStatus(body.message || "Import removido com sucesso.");
+    await Promise.all([loadRecentImports(), loadStats()]);
+  } catch {
+    setStatus("API local indisponível para remover import.", false);
+  }
+}
+
+
+let searchDebounceId = null;
+function scheduleSearchReload() {
+  if (searchDebounceId) clearTimeout(searchDebounceId);
+  searchDebounceId = setTimeout(async () => {
+    currentOffset = 0;
+    await loadRecentImports();
+  }, 250);
+}
+
+importsEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+
+  if (target.classList.contains("btn-remove")) {
+    const id = target.getAttribute("data-id");
+    if (!id) return;
+    target.setAttribute("disabled", "true");
+    await deleteImportById(id);
+    return;
+  }
+
+  if (target.classList.contains("btn-play")) {
+    const id = target.getAttribute("data-play-id");
+    const title = target.getAttribute("data-play-title") || "faixa";
+    if (!id) return;
+    await playImport(id, title);
+  }
+});
+
+statusFilterEl.addEventListener("change", async () => {
+  currentOffset = 0;
+  await loadRecentImports();
+});
+
+searchInputEl.addEventListener("input", () => {
+  scheduleSearchReload();
+});
+
+prevPageEl.addEventListener("click", async () => {
+  currentOffset = Math.max(0, currentOffset - PAGE_LIMIT);
+  await loadRecentImports();
+});
+
+nextPageEl.addEventListener("click", async () => {
+  if (!hasMore) return;
+  currentOffset += PAGE_LIMIT;
+  await loadRecentImports();
+});
 
 importButton.addEventListener("click", async () => {
   importButton.disabled = true;
@@ -136,7 +278,8 @@ importButton.addEventListener("click", async () => {
     if (response.ok) {
       setStatus(body.message || "Importação enviada com sucesso.");
       setApiBadge("ok");
-      await loadRecentImports();
+      currentOffset = 0;
+      await Promise.all([loadRecentImports(), loadStats()]);
     } else {
       setStatus(body.message || "Falha ao importar.", false);
       setApiBadge("error");
@@ -149,6 +292,11 @@ importButton.addEventListener("click", async () => {
   }
 });
 
-refreshButton.addEventListener("click", loadRecentImports);
+refreshButton.addEventListener("click", async () => {
+  await Promise.all([loadRecentImports(), loadStats()]);
+});
+
 checkHealth();
-loadRecentImports();
+setStats();
+updatePager();
+Promise.all([loadRecentImports(), loadStats()]);

@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-    routing::post,
+    http::{header, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post},
     Json, Router,
 };
 use reqwest::Client;
@@ -16,8 +16,8 @@ use crate::{
     db,
     importer::{import_from_url, maybe_download_audio, ImportError},
     models::{
-        ApiErrorResponse, HealthResponse, ImportItem, ImportRequest, ImportResponse,
-        ImportsListResponse,
+        ActionResponse, ApiErrorResponse, HealthResponse, ImportItem, ImportRequest,
+        ImportResponse, ImportsListResponse, StatsResponse,
     },
 };
 
@@ -31,14 +31,22 @@ pub struct AppState {
 #[derive(Debug, Deserialize)]
 struct ImportsQuery {
     limit: Option<usize>,
+    offset: Option<usize>,
+    status: Option<String>,
+    q: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/stats", get(stats))
         .route("/import", post(import))
         .route("/imports", get(list_imports))
-        .route("/imports/:id", get(get_import_by_id))
+        .route(
+            "/imports/:id",
+            get(get_import_by_id).delete(delete_import_by_id),
+        )
+        .route("/imports/:id/audio", get(stream_import_audio))
         .with_state(state)
 }
 
@@ -47,6 +55,28 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         service: "music-importer-api",
     })
+}
+
+async fn stats(State(state): State<AppState>) -> impl IntoResponse {
+    match db::fetch_stats(&state.db_path) {
+        Ok(s) => (
+            StatusCode::OK,
+            Json(StatsResponse {
+                total: s.total,
+                parsed: s.parsed,
+                downloaded: s.downloaded,
+                failed: s.failed,
+            }),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorResponse {
+                error: format!("Falha ao calcular estatísticas: {err}"),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 async fn import(
@@ -135,10 +165,30 @@ async fn list_imports(
     Query(query): Query<ImportsQuery>,
 ) -> impl IntoResponse {
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
+    let status_filter = query
+        .status
+        .as_deref()
+        .filter(|s| matches!(*s, "parsed" | "downloaded" | "failed"));
 
-    match db::list_imports(&state.db_path, limit) {
+    let search_filter = query.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let total = match db::count_imports(&state.db_path, status_filter, search_filter) {
+        Ok(total) => total,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiErrorResponse {
+                    error: format!("Falha ao contar importações: {err}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match db::list_imports(&state.db_path, limit, offset, status_filter, search_filter) {
         Ok(rows) => {
-            let items = rows
+            let items: Vec<ImportItem> = rows
                 .into_iter()
                 .map(|r| ImportItem {
                     id: r.id,
@@ -152,7 +202,19 @@ async fn list_imports(
                 })
                 .collect();
 
-            (StatusCode::OK, Json(ImportsListResponse { items })).into_response()
+            let has_more = (offset + items.len()) < (total as usize);
+
+            (
+                StatusCode::OK,
+                Json(ImportsListResponse {
+                    items,
+                    total,
+                    limit,
+                    offset,
+                    has_more,
+                }),
+            )
+                .into_response()
         }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -195,4 +257,94 @@ async fn get_import_by_id(State(state): State<AppState>, Path(id): Path<i64>) ->
         )
             .into_response(),
     }
+}
+
+async fn delete_import_by_id(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    match db::delete_import_by_id(&state.db_path, id) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ActionResponse {
+                ok: true,
+                message: format!("Importação id={id} removida"),
+            }),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ActionResponse {
+                ok: false,
+                message: format!("Importação id={id} não encontrada"),
+            }),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ActionResponse {
+                ok: false,
+                message: format!("Falha ao remover importação: {err}"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn stream_import_audio(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
+    let import = db::get_import_by_id(&state.db_path, id)
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiErrorResponse {
+                    error: format!("Falha ao consultar importação: {err}"),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ApiErrorResponse {
+                    error: format!("Importação id={id} não encontrada"),
+                }),
+            )
+        })?;
+
+    let audio_path = import.local_audio_path.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorResponse {
+                error: "Áudio local não disponível para esta importação".to_string(),
+            }),
+        )
+    })?;
+
+    let path = FsPath::new(&audio_path);
+    if !path.exists() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorResponse {
+                error: "Arquivo de áudio não encontrado no disco".to_string(),
+            }),
+        ));
+    }
+
+    let bytes = tokio::fs::read(path).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorResponse {
+                error: format!("Falha ao ler arquivo de áudio: {err}"),
+            }),
+        )
+    })?;
+
+    let mut response = Response::new(Body::from(bytes));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
+
+    Ok(response)
 }

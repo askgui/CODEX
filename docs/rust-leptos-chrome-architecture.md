@@ -319,3 +319,48 @@ Arquivos de frontend:
 - `extension/popup.html`
 - `extension/popup.css`
 - `extension/popup.js`
+
+## 15) Evolução de gestão no frontend + API
+
+Novas capacidades implementadas:
+
+- Endpoint `GET /stats` com contadores agregados (`total`, `parsed`, `downloaded`, `failed`).
+- Endpoint `DELETE /imports/:id` para limpeza de histórico.
+- Popup com painel de métricas em tempo real e botão **Remover** por item.
+
+Isso deixa a extensão não apenas como gatilho de importação, mas também como mini painel operacional.
+
+## 16) Reprodução da música no app/extensão
+
+Agora o usuário pode ouvir a música importada após download local:
+
+- Backend expõe `GET /imports/:id/audio` para stream do arquivo MP3 salvo.
+- Popup mostra botão **Ouvir** para itens com `local_audio_path`.
+- Popup possui player HTML5 (`<audio controls>`) para tocar a faixa sem sair da extensão.
+
+Fluxo:
+
+1. Usuário importa URL do Suno.
+2. App baixa o áudio para `downloads/<song_id>.mp3`.
+3. Usuário clica em **Ouvir** no histórico.
+4. Extensão chama `GET /imports/:id/audio`.
+5. Player reproduz o áudio local.
+
+## 17) Paginação e filtro de histórico
+
+Para escalar o uso com muitos imports:
+
+- `GET /imports` agora aceita:
+  - `limit`
+  - `offset`
+  - `status` (`parsed`, `downloaded`, `failed`)
+  - `q` (busca por título/URL)
+- A resposta inclui metadados de paginação:
+  - `total`, `limit`, `offset`, `has_more`
+
+No popup:
+
+- Filtro por status.
+- Busca textual por título/URL.
+- Botões **Anterior** / **Próxima**.
+- Contagem total coerente com filtro + busca aplicados.
