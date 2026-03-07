@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Importer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <div>
+          <p class="app__eyebrow">Suno Importer</p>
+          <h1>Importar música</h1>
+        </div>
+        <span id="api-badge" class="badge badge--idle">API?</span>
+      </header>
+
+      <section class="stats" id="stats-cards">
+        <article class="stat-card">
+          <p>Total</p>
+          <strong id="stat-total">0</strong>
+        </article>
+        <article class="stat-card">
+          <p>Parsed</p>
+          <strong id="stat-parsed">0</strong>
+        </article>
+        <article class="stat-card">
+          <p>Downloaded</p>
+          <strong id="stat-downloaded">0</strong>
+        </article>
+        <article class="stat-card">
+          <p>Failed</p>
+          <strong id="stat-failed">0</strong>
+        </article>
+      </section>
+
+      <section class="card card--primary">
+        <p class="card__title">Ação rápida</p>
+        <div class="actions">
+          <button id="import" class="btn btn--primary">Importar aba atual</button>
+          <button id="refresh" type="button" class="btn btn--ghost">Atualizar histórico</button>
+        </div>
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card">
+        <div class="card__row">
+          <p class="card__title">Últimos imports</p>
+          <span id="count" class="count">0</span>
+        </div>
+        <ol id="imports" class="imports"></ol>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
