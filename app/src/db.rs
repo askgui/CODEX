@@ -9,7 +9,27 @@ pub struct ImportRecord {
     pub title: Option<String>,
     pub lyrics: Option<String>,
     pub audio_url: Option<String>,
+    pub local_audio_path: Option<String>,
+    pub status: String,
+    pub error_message: Option<String>,
     pub created_at: String,
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    let exists = cols.flatten().any(|c| c == column);
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl};"))?;
+    }
+
+    Ok(())
 }
 
 pub fn init(db_path: &str) -> Result<(), rusqlite::Error> {
@@ -19,10 +39,13 @@ pub fn init(db_path: &str) -> Result<(), rusqlite::Error> {
         "
         CREATE TABLE IF NOT EXISTS imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_url TEXT NOT NULL,
+            source_url TEXT NOT NULL UNIQUE,
             title TEXT,
             lyrics TEXT,
             audio_url TEXT,
+            local_audio_path TEXT,
+            status TEXT NOT NULL DEFAULT 'parsed',
+            error_message TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -30,21 +53,71 @@ pub fn init(db_path: &str) -> Result<(), rusqlite::Error> {
         ",
     )?;
 
+    ensure_column(&conn, "imports", "local_audio_path", "TEXT")?;
+    ensure_column(&conn, "imports", "status", "TEXT NOT NULL DEFAULT 'parsed'")?;
+    ensure_column(&conn, "imports", "error_message", "TEXT")?;
+
     Ok(())
 }
 
-pub fn save_import(db_path: &str, song: &SongMetadata) -> Result<i64, rusqlite::Error> {
+pub fn upsert_import(db_path: &str, song: &SongMetadata) -> Result<i64, rusqlite::Error> {
     let conn = Connection::open(db_path)?;
 
     conn.execute(
         "
-        INSERT INTO imports (source_url, title, lyrics, audio_url)
-        VALUES (?1, ?2, ?3, ?4)
+        INSERT INTO imports (source_url, title, lyrics, audio_url, local_audio_path, status, error_message)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(source_url) DO UPDATE SET
+            title=excluded.title,
+            lyrics=excluded.lyrics,
+            audio_url=excluded.audio_url,
+            local_audio_path=excluded.local_audio_path,
+            status=excluded.status,
+            error_message=excluded.error_message
         ",
-        params![song.source_url, song.title, song.lyrics, song.audio_url],
+        params![
+            song.source_url,
+            song.title,
+            song.lyrics,
+            song.audio_url,
+            song.local_audio_path,
+            if song.local_audio_path.is_some() {
+                "downloaded"
+            } else {
+                "parsed"
+            },
+            Option::<String>::None,
+        ],
     )?;
 
-    Ok(conn.last_insert_rowid())
+    let id: i64 = conn.query_row(
+        "SELECT id FROM imports WHERE source_url = ?1",
+        params![song.source_url],
+        |row| row.get(0),
+    )?;
+
+    Ok(id)
+}
+
+pub fn mark_import_error(
+    db_path: &str,
+    source_url: &str,
+    error_message: &str,
+) -> Result<(), rusqlite::Error> {
+    let conn = Connection::open(db_path)?;
+
+    conn.execute(
+        "
+        INSERT INTO imports (source_url, status, error_message)
+        VALUES (?1, 'failed', ?2)
+        ON CONFLICT(source_url) DO UPDATE SET
+            status='failed',
+            error_message=excluded.error_message
+        ",
+        params![source_url, error_message],
+    )?;
+
+    Ok(())
 }
 
 pub fn list_imports(db_path: &str, limit: usize) -> Result<Vec<ImportRecord>, rusqlite::Error> {
@@ -52,7 +125,7 @@ pub fn list_imports(db_path: &str, limit: usize) -> Result<Vec<ImportRecord>, ru
 
     let mut stmt = conn.prepare(
         "
-        SELECT id, source_url, title, lyrics, audio_url, created_at
+        SELECT id, source_url, title, lyrics, audio_url, local_audio_path, status, error_message, created_at
         FROM imports
         ORDER BY id DESC
         LIMIT ?1
@@ -66,22 +139,54 @@ pub fn list_imports(db_path: &str, limit: usize) -> Result<Vec<ImportRecord>, ru
             title: row.get(2)?,
             lyrics: row.get(3)?,
             audio_url: row.get(4)?,
-            created_at: row.get(5)?,
+            local_audio_path: row.get(5)?,
+            status: row.get(6)?,
+            error_message: row.get(7)?,
+            created_at: row.get(8)?,
         })
     })?;
 
     rows.collect()
 }
 
+pub fn get_import_by_id(db_path: &str, id: i64) -> Result<Option<ImportRecord>, rusqlite::Error> {
+    let conn = Connection::open(db_path)?;
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT id, source_url, title, lyrics, audio_url, local_audio_path, status, error_message, created_at
+        FROM imports
+        WHERE id = ?1
+        ",
+    )?;
+
+    let mut rows = stmt.query(params![id])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(ImportRecord {
+            id: row.get(0)?,
+            source_url: row.get(1)?,
+            title: row.get(2)?,
+            lyrics: row.get(3)?,
+            audio_url: row.get(4)?,
+            local_audio_path: row.get(5)?,
+            status: row.get(6)?,
+            error_message: row.get(7)?,
+            created_at: row.get(8)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{init, list_imports, save_import};
+    use super::{get_import_by_id, init, list_imports, mark_import_error, upsert_import};
     use crate::models::SongMetadata;
 
     #[test]
-    fn init_save_and_list_imports() {
+    fn init_upsert_and_list_imports() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
@@ -96,13 +201,37 @@ mod tests {
             title: Some("Teste".to_string()),
             lyrics: None,
             audio_url: Some("https://cdn.suno.com/abc.mp3".to_string()),
+            local_audio_path: Some("downloads/abc.mp3".to_string()),
         };
 
-        let id = save_import(&db_path, &song).expect("save import");
+        let id = upsert_import(&db_path, &song).expect("upsert import");
         assert!(id > 0);
 
         let rows = list_imports(&db_path, 10).expect("list imports");
         assert!(!rows.is_empty());
         assert_eq!(rows[0].source_url, "https://suno.com/song/abc");
+        assert_eq!(rows[0].status, "downloaded");
+
+        let by_id = get_import_by_id(&db_path, id)
+            .expect("get by id")
+            .expect("exists");
+        assert_eq!(by_id.id, id);
+    }
+
+    #[test]
+    fn mark_error_upserts_row() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!("music-importer-test-{nonce}.db"));
+        let db_path = db_path.to_string_lossy().to_string();
+
+        init(&db_path).expect("init db");
+        mark_import_error(&db_path, "https://suno.com/song/fail", "erro").expect("mark error");
+
+        let rows = list_imports(&db_path, 10).expect("list");
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].error_message.as_deref(), Some("erro"));
     }
 }

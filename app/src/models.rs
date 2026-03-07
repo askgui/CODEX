@@ -13,12 +13,13 @@ pub struct ImportResponse {
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct SongMetadata {
     pub source_url: String,
     pub title: Option<String>,
     pub lyrics: Option<String>,
     pub audio_url: Option<String>,
+    pub local_audio_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +28,9 @@ pub struct ImportItem {
     pub source_url: String,
     pub title: Option<String>,
     pub audio_url: Option<String>,
+    pub local_audio_path: Option<String>,
+    pub status: String,
+    pub error_message: Option<String>,
     pub created_at: String,
 }
 

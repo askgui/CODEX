@@ -31,8 +31,10 @@ function renderImports(items) {
   for (const item of items) {
     const li = document.createElement("li");
     const title = item.title || "(sem título)";
-    li.textContent = `#${item.id} • ${title}`;
-    li.title = `${item.source_url}\n${item.created_at}`;
+    const status = item.status || "desconhecido";
+    const local = item.local_audio_path ? " 🎵" : "";
+    li.textContent = `#${item.id} • [${status}] ${title}${local}`;
+    li.title = `${item.source_url}\n${item.created_at}${item.error_message ? `\nErro: ${item.error_message}` : ""}`;
     importsEl.appendChild(li);
   }
 }

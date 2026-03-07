@@ -275,3 +275,32 @@ Exemplo de resposta do `POST /import`:
   "message": "Importação iniciada e persistida com sucesso"
 }
 ```
+
+## 13) Novas implementações de robustez (fase atual)
+
+A arquitetura local foi evoluída com foco em operação contínua:
+
+- **Deduplicação por URL** (`source_url` único no SQLite) com `upsert`.
+- **Estados de processamento** em banco:
+  - `parsed` (metadados extraídos)
+  - `downloaded` (áudio salvo localmente)
+  - `failed` (erro durante import)
+- **Download local de áudio** quando `audio_url` está disponível.
+- **Novo endpoint** `GET /imports/:id` para consulta de item específico.
+- **Registro de erro** no banco quando o import falha.
+
+### Endpoints atuais
+
+- `GET /health`
+- `POST /import`
+- `GET /imports?limit=20`
+- `GET /imports/:id`
+
+### Estrutura local de arquivos gerados
+
+```text
+/workspace/CODEX/
+  music_importer.db
+  downloads/
+    <song_id>.mp3
+```

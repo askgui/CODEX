@@ -4,6 +4,7 @@ mod importer;
 mod models;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use reqwest::Client;
 use tokio::net::TcpListener;
@@ -22,12 +23,15 @@ async fn main() {
     let db_path = "music_importer.db".to_string();
     db::init(&db_path).expect("falha ao inicializar banco SQLite");
 
+    let downloads_dir = PathBuf::from("downloads");
+
     let state = AppState {
         http_client: Client::builder()
             .user_agent("music-importer/0.1")
             .build()
             .expect("falha ao criar cliente HTTP"),
         db_path,
+        downloads_dir,
     };
 
     let app = router(state);

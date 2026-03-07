@@ -1,7 +1,11 @@
+use std::path::Path;
+
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
 use crate::models::SongMetadata;
@@ -72,7 +76,7 @@ fn parse_metadata_from_html(source_url: &str, html: &str) -> SongMetadata {
                 .and_then(|t| normalize_text(&t))
         });
 
-    let audio_url = doc
+    let mut audio_url = doc
         .select(&og_audio_selector)
         .next()
         .and_then(|n| n.value().attr("content"))
@@ -91,32 +95,24 @@ fn parse_metadata_from_html(source_url: &str, html: &str) -> SongMetadata {
             Err(_) => continue,
         };
 
-        let candidate = parsed
+        let candidate_lyrics = parsed
             .get("lyrics")
             .and_then(Value::as_str)
             .or_else(|| parsed.get("articleBody").and_then(Value::as_str))
             .or_else(|| parsed.get("description").and_then(Value::as_str))
             .and_then(normalize_text);
 
-        if lyrics.is_none() && candidate.is_some() {
-            lyrics = candidate;
+        if lyrics.is_none() {
+            lyrics = candidate_lyrics;
         }
 
         if audio_url.is_none() {
-            if let Some(audio) = parsed
+            audio_url = parsed
                 .get("audio")
                 .and_then(Value::as_object)
                 .and_then(|audio| audio.get("contentUrl"))
                 .and_then(Value::as_str)
-                .and_then(normalize_text)
-            {
-                return SongMetadata {
-                    source_url: source_url.to_string(),
-                    title,
-                    lyrics,
-                    audio_url: Some(audio),
-                };
-            }
+                .and_then(normalize_text);
         }
     }
 
@@ -125,7 +121,61 @@ fn parse_metadata_from_html(source_url: &str, html: &str) -> SongMetadata {
         title,
         lyrics,
         audio_url,
+        local_audio_path: None,
     }
+}
+
+fn song_id_from_url(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(parsed) => parsed
+            .path_segments()
+            .and_then(|mut segs| segs.next_back())
+            .unwrap_or("unknown")
+            .to_string(),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+pub async fn maybe_download_audio(
+    client: &Client,
+    song: &SongMetadata,
+    downloads_dir: &Path,
+) -> Result<Option<String>, String> {
+    let Some(audio_url) = &song.audio_url else {
+        return Ok(None);
+    };
+
+    fs::create_dir_all(downloads_dir)
+        .await
+        .map_err(|e| format!("falha ao criar diretório de áudio: {e}"))?;
+
+    let song_id = song_id_from_url(&song.source_url);
+    let file_path = downloads_dir.join(format!("{song_id}.mp3"));
+
+    if file_path.exists() {
+        return Ok(Some(file_path.to_string_lossy().to_string()));
+    }
+
+    let bytes = client
+        .get(audio_url)
+        .send()
+        .await
+        .map_err(|e| format!("falha no download do áudio: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("resposta inválida no download do áudio: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("falha lendo bytes do áudio: {e}"))?;
+
+    let mut file = fs::File::create(&file_path)
+        .await
+        .map_err(|e| format!("falha criando arquivo de áudio: {e}"))?;
+
+    file.write_all(&bytes)
+        .await
+        .map_err(|e| format!("falha escrevendo arquivo de áudio: {e}"))?;
+
+    Ok(Some(file_path.to_string_lossy().to_string()))
 }
 
 pub async fn import_from_url(
@@ -195,5 +245,6 @@ mod tests {
             Some("https://cdn.suno.com/audio.mp3")
         );
         assert_eq!(song.lyrics.as_deref(), Some("Letra resumida"));
+        assert_eq!(song.local_audio_path.as_deref(), None);
     }
 }
