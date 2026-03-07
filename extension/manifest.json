@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Music Importer",
+  "version": "1.0.0",
+  "description": "Envia URLs de músicas do Suno para a API local em Rust.",
+  "permissions": ["activeTab", "tabs"],
+  "host_permissions": ["http://localhost:7878/*", "https://suno.com/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://suno.com/song/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
