@@ -4,6 +4,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
+    routing::{get, post},
     routing::get,
     routing::post,
     Json, Router,
@@ -16,6 +17,8 @@ use crate::{
     db,
     importer::{import_from_url, maybe_download_audio, ImportError},
     models::{
+        ActionResponse, ApiErrorResponse, HealthResponse, ImportItem, ImportRequest,
+        ImportResponse, ImportsListResponse, StatsResponse,
         ApiErrorResponse, HealthResponse, ImportItem, ImportRequest, ImportResponse,
         ImportsListResponse,
     },
@@ -36,6 +39,13 @@ struct ImportsQuery {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/stats", get(stats))
+        .route("/import", post(import))
+        .route("/imports", get(list_imports))
+        .route(
+            "/imports/:id",
+            get(get_import_by_id).delete(delete_import_by_id),
+        )
         .route("/import", post(import))
         .route("/imports", get(list_imports))
         .route("/imports/:id", get(get_import_by_id))
@@ -47,6 +57,28 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         service: "music-importer-api",
     })
+}
+
+async fn stats(State(state): State<AppState>) -> impl IntoResponse {
+    match db::fetch_stats(&state.db_path) {
+        Ok(s) => (
+            StatusCode::OK,
+            Json(StatsResponse {
+                total: s.total,
+                parsed: s.parsed,
+                downloaded: s.downloaded,
+                failed: s.failed,
+            }),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorResponse {
+                error: format!("Falha ao calcular estatísticas: {err}"),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 async fn import(
@@ -191,6 +223,38 @@ async fn get_import_by_id(State(state): State<AppState>, Path(id): Path<i64>) ->
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiErrorResponse {
                 error: format!("Falha ao consultar importação: {err}"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn delete_import_by_id(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    match db::delete_import_by_id(&state.db_path, id) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ActionResponse {
+                ok: true,
+                message: format!("Importação id={id} removida"),
+            }),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ActionResponse {
+                ok: false,
+                message: format!("Importação id={id} não encontrada"),
+            }),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ActionResponse {
+                ok: false,
+                message: format!("Falha ao remover importação: {err}"),
             }),
         )
             .into_response(),

@@ -304,3 +304,28 @@ A arquitetura local foi evoluída com foco em operação contínua:
   downloads/
     <song_id>.mp3
 ```
+
+## 14) Frontend da extensão (UI nova)
+
+A extensão agora possui uma interface visual mais completa no popup:
+
+- Cabeçalho com estado da API (`API ON` / `API OFF`).
+- Card de ação com botões de import e atualização de histórico.
+- Lista de imports com tags de status (`parsed`, `downloaded`, `failed`).
+- Indicador visual `🎵` quando existe `local_audio_path` (áudio salvo localmente).
+
+Arquivos de frontend:
+
+- `extension/popup.html`
+- `extension/popup.css`
+- `extension/popup.js`
+
+## 15) Evolução de gestão no frontend + API
+
+Novas capacidades implementadas:
+
+- Endpoint `GET /stats` com contadores agregados (`total`, `parsed`, `downloaded`, `failed`).
+- Endpoint `DELETE /imports/:id` para limpeza de histórico.
+- Popup com painel de métricas em tempo real e botão **Remover** por item.
+
+Isso deixa a extensão não apenas como gatilho de importação, mas também como mini painel operacional.
