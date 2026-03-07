@@ -33,6 +33,7 @@ struct ImportsQuery {
     limit: Option<usize>,
     offset: Option<usize>,
     status: Option<String>,
+    q: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -170,7 +171,9 @@ async fn list_imports(
         .as_deref()
         .filter(|s| matches!(*s, "parsed" | "downloaded" | "failed"));
 
-    let total = match db::count_imports(&state.db_path, status_filter) {
+    let search_filter = query.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let total = match db::count_imports(&state.db_path, status_filter, search_filter) {
         Ok(total) => total,
         Err(err) => {
             return (
@@ -183,7 +186,7 @@ async fn list_imports(
         }
     };
 
-    match db::list_imports(&state.db_path, limit, offset, status_filter) {
+    match db::list_imports(&state.db_path, limit, offset, status_filter, search_filter) {
         Ok(rows) => {
             let items: Vec<ImportItem> = rows
                 .into_iter()

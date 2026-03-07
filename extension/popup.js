@@ -14,6 +14,7 @@ const statusFilterEl = document.getElementById("status-filter");
 const prevPageEl = document.getElementById("prev-page");
 const nextPageEl = document.getElementById("next-page");
 const pageLabelEl = document.getElementById("page-label");
+const searchInputEl = document.getElementById("search-input");
 
 const PAGE_LIMIT = 10;
 let currentOffset = 0;
@@ -157,6 +158,8 @@ async function loadRecentImports() {
       offset: String(currentOffset)
     });
     if (status) params.set("status", status);
+    const search = searchInputEl.value.trim();
+    if (search) params.set("q", search);
 
     const response = await fetch(`http://localhost:7878/imports?${params.toString()}`);
 
@@ -197,6 +200,16 @@ async function deleteImportById(id) {
   }
 }
 
+
+let searchDebounceId = null;
+function scheduleSearchReload() {
+  if (searchDebounceId) clearTimeout(searchDebounceId);
+  searchDebounceId = setTimeout(async () => {
+    currentOffset = 0;
+    await loadRecentImports();
+  }, 250);
+}
+
 importsEl.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
@@ -220,6 +233,10 @@ importsEl.addEventListener("click", async (event) => {
 statusFilterEl.addEventListener("change", async () => {
   currentOffset = 0;
   await loadRecentImports();
+});
+
+searchInputEl.addEventListener("input", () => {
+  scheduleSearchReload();
 });
 
 prevPageEl.addEventListener("click", async () => {

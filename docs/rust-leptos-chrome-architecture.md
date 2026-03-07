@@ -354,11 +354,13 @@ Para escalar o uso com muitos imports:
   - `limit`
   - `offset`
   - `status` (`parsed`, `downloaded`, `failed`)
+  - `q` (busca por título/URL)
 - A resposta inclui metadados de paginação:
   - `total`, `limit`, `offset`, `has_more`
 
 No popup:
 
 - Filtro por status.
+- Busca textual por título/URL.
 - Botões **Anterior** / **Próxima**.
-- Contagem total coerente com o filtro aplicado.
+- Contagem total coerente com filtro + busca aplicados.
