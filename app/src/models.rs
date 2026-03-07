@@ -37,6 +37,10 @@ pub struct ImportItem {
 #[derive(Debug, Serialize)]
 pub struct ImportsListResponse {
     pub items: Vec<ImportItem>,
+    pub total: i64,
+    pub limit: usize,
+    pub offset: usize,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Serialize)]

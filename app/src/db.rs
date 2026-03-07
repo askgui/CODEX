@@ -128,33 +128,84 @@ pub fn mark_import_error(
     Ok(())
 }
 
-pub fn list_imports(db_path: &str, limit: usize) -> Result<Vec<ImportRecord>, rusqlite::Error> {
+pub fn list_imports(
+    db_path: &str,
+    limit: usize,
+    offset: usize,
+    status_filter: Option<&str>,
+) -> Result<Vec<ImportRecord>, rusqlite::Error> {
     let conn = Connection::open(db_path)?;
 
-    let mut stmt = conn.prepare(
-        "
+    let (sql, with_filter) = if status_filter.is_some() {
+        (
+            "
+        SELECT id, source_url, title, lyrics, audio_url, local_audio_path, status, error_message, created_at
+        FROM imports
+        WHERE status = ?1
+        ORDER BY id DESC
+        LIMIT ?2 OFFSET ?3
+        ",
+            true,
+        )
+    } else {
+        (
+            "
         SELECT id, source_url, title, lyrics, audio_url, local_audio_path, status, error_message, created_at
         FROM imports
         ORDER BY id DESC
-        LIMIT ?1
+        LIMIT ?1 OFFSET ?2
         ",
-    )?;
+            false,
+        )
+    };
 
-    let rows = stmt.query_map(params![limit as i64], |row| {
-        Ok(ImportRecord {
-            id: row.get(0)?,
-            source_url: row.get(1)?,
-            title: row.get(2)?,
-            lyrics: row.get(3)?,
-            audio_url: row.get(4)?,
-            local_audio_path: row.get(5)?,
-            status: row.get(6)?,
-            error_message: row.get(7)?,
-            created_at: row.get(8)?,
-        })
-    })?;
+    let mut stmt = conn.prepare(sql)?;
+
+    let rows = if with_filter {
+        stmt.query_map(params![status_filter, limit as i64, offset as i64], |row| {
+            Ok(ImportRecord {
+                id: row.get(0)?,
+                source_url: row.get(1)?,
+                title: row.get(2)?,
+                lyrics: row.get(3)?,
+                audio_url: row.get(4)?,
+                local_audio_path: row.get(5)?,
+                status: row.get(6)?,
+                error_message: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?
+    } else {
+        stmt.query_map(params![limit as i64, offset as i64], |row| {
+            Ok(ImportRecord {
+                id: row.get(0)?,
+                source_url: row.get(1)?,
+                title: row.get(2)?,
+                lyrics: row.get(3)?,
+                audio_url: row.get(4)?,
+                local_audio_path: row.get(5)?,
+                status: row.get(6)?,
+                error_message: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?
+    };
 
     rows.collect()
+}
+
+pub fn count_imports(db_path: &str, status_filter: Option<&str>) -> Result<i64, rusqlite::Error> {
+    let conn = Connection::open(db_path)?;
+
+    if let Some(status) = status_filter {
+        conn.query_row(
+            "SELECT COUNT(*) FROM imports WHERE status = ?1",
+            params![status],
+            |row| row.get(0),
+        )
+    } else {
+        conn.query_row("SELECT COUNT(*) FROM imports", [], |row| row.get(0))
+    }
 }
 
 pub fn get_import_by_id(db_path: &str, id: i64) -> Result<Option<ImportRecord>, rusqlite::Error> {
@@ -225,8 +276,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        delete_import_by_id, fetch_stats, get_import_by_id, init, list_imports, mark_import_error,
-        upsert_import,
+        count_imports, delete_import_by_id, fetch_stats, get_import_by_id, init, list_imports,
+        mark_import_error, upsert_import,
     };
     use crate::models::SongMetadata;
 
@@ -252,7 +303,7 @@ mod tests {
         let id = upsert_import(&db_path, &song).expect("upsert import");
         assert!(id > 0);
 
-        let rows = list_imports(&db_path, 10).expect("list imports");
+        let rows = list_imports(&db_path, 10, 0, None).expect("list imports");
         assert!(!rows.is_empty());
         assert_eq!(rows[0].source_url, "https://suno.com/song/abc");
         assert_eq!(rows[0].status, "downloaded");
@@ -280,12 +331,15 @@ mod tests {
         init(&db_path).expect("init db");
         mark_import_error(&db_path, "https://suno.com/song/fail", "erro").expect("mark error");
 
-        let rows = list_imports(&db_path, 10).expect("list");
+        let rows = list_imports(&db_path, 10, 0, None).expect("list");
         assert_eq!(rows[0].status, "failed");
         assert_eq!(rows[0].error_message.as_deref(), Some("erro"));
 
         let stats = fetch_stats(&db_path).expect("stats");
         assert_eq!(stats.total, 1);
         assert_eq!(stats.failed, 1);
+
+        let failed_count = count_imports(&db_path, Some("failed")).expect("count filtered");
+        assert_eq!(failed_count, 1);
     }
 }

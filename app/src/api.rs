@@ -31,6 +31,8 @@ pub struct AppState {
 #[derive(Debug, Deserialize)]
 struct ImportsQuery {
     limit: Option<usize>,
+    offset: Option<usize>,
+    status: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -162,10 +164,28 @@ async fn list_imports(
     Query(query): Query<ImportsQuery>,
 ) -> impl IntoResponse {
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
+    let status_filter = query
+        .status
+        .as_deref()
+        .filter(|s| matches!(*s, "parsed" | "downloaded" | "failed"));
 
-    match db::list_imports(&state.db_path, limit) {
+    let total = match db::count_imports(&state.db_path, status_filter) {
+        Ok(total) => total,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiErrorResponse {
+                    error: format!("Falha ao contar importações: {err}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    match db::list_imports(&state.db_path, limit, offset, status_filter) {
         Ok(rows) => {
-            let items = rows
+            let items: Vec<ImportItem> = rows
                 .into_iter()
                 .map(|r| ImportItem {
                     id: r.id,
@@ -179,7 +199,19 @@ async fn list_imports(
                 })
                 .collect();
 
-            (StatusCode::OK, Json(ImportsListResponse { items })).into_response()
+            let has_more = (offset + items.len()) < (total as usize);
+
+            (
+                StatusCode::OK,
+                Json(ImportsListResponse {
+                    items,
+                    total,
+                    limit,
+                    offset,
+                    has_more,
+                }),
+            )
+                .into_response()
         }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -10,6 +10,14 @@ const statDownloadedEl = document.getElementById("stat-downloaded");
 const statFailedEl = document.getElementById("stat-failed");
 const playerEl = document.getElementById("audio-player");
 const nowPlayingEl = document.getElementById("now-playing");
+const statusFilterEl = document.getElementById("status-filter");
+const prevPageEl = document.getElementById("prev-page");
+const nextPageEl = document.getElementById("next-page");
+const pageLabelEl = document.getElementById("page-label");
+
+const PAGE_LIMIT = 10;
+let currentOffset = 0;
+let hasMore = false;
 
 function escapeHtml(value) {
   return String(value)
@@ -46,6 +54,13 @@ function setStats(stats = {}) {
   statFailedEl.textContent = String(stats.failed || 0);
 }
 
+function updatePager() {
+  const page = Math.floor(currentOffset / PAGE_LIMIT) + 1;
+  pageLabelEl.textContent = `Página ${page}`;
+  prevPageEl.disabled = currentOffset === 0;
+  nextPageEl.disabled = !hasMore;
+}
+
 function isValidSunoSongUrl(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
@@ -65,13 +80,13 @@ function statusTag(status) {
   return map[status] || { cls: "tag--parsed", label: escapeHtml(status || "unknown") };
 }
 
-function renderImports(items) {
-  countEl.textContent = String(items?.length || 0);
+function renderImports(items, total) {
+  countEl.textContent = String(total ?? (items?.length || 0));
   importsEl.innerHTML = "";
 
   if (!items?.length) {
     const li = document.createElement("li");
-    li.textContent = "Nenhum import registrado ainda.";
+    li.textContent = "Nenhum import registrado para este filtro.";
     importsEl.appendChild(li);
     return;
   }
@@ -124,10 +139,7 @@ async function checkHealth() {
 async function loadStats() {
   try {
     const response = await fetch("http://localhost:7878/stats");
-    if (!response.ok) {
-      return;
-    }
-
+    if (!response.ok) return;
     const body = await response.json().catch(() => ({}));
     setStats(body);
   } catch {
@@ -139,7 +151,14 @@ async function loadRecentImports() {
   refreshButton.disabled = true;
 
   try {
-    const response = await fetch("http://localhost:7878/imports?limit=10");
+    const status = statusFilterEl.value;
+    const params = new URLSearchParams({
+      limit: String(PAGE_LIMIT),
+      offset: String(currentOffset)
+    });
+    if (status) params.set("status", status);
+
+    const response = await fetch(`http://localhost:7878/imports?${params.toString()}`);
 
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -149,7 +168,9 @@ async function loadRecentImports() {
     }
 
     const body = await response.json();
-    renderImports(body.items || []);
+    hasMore = Boolean(body.has_more);
+    renderImports(body.items || [], body.total);
+    updatePager();
     setApiBadge("ok");
   } catch {
     setStatus("API local indisponível para listar imports.", false);
@@ -196,6 +217,22 @@ importsEl.addEventListener("click", async (event) => {
   }
 });
 
+statusFilterEl.addEventListener("change", async () => {
+  currentOffset = 0;
+  await loadRecentImports();
+});
+
+prevPageEl.addEventListener("click", async () => {
+  currentOffset = Math.max(0, currentOffset - PAGE_LIMIT);
+  await loadRecentImports();
+});
+
+nextPageEl.addEventListener("click", async () => {
+  if (!hasMore) return;
+  currentOffset += PAGE_LIMIT;
+  await loadRecentImports();
+});
+
 importButton.addEventListener("click", async () => {
   importButton.disabled = true;
   setStatus("Enviando para API local...");
@@ -224,6 +261,7 @@ importButton.addEventListener("click", async () => {
     if (response.ok) {
       setStatus(body.message || "Importação enviada com sucesso.");
       setApiBadge("ok");
+      currentOffset = 0;
       await Promise.all([loadRecentImports(), loadStats()]);
     } else {
       setStatus(body.message || "Falha ao importar.", false);
@@ -243,4 +281,5 @@ refreshButton.addEventListener("click", async () => {
 
 checkHealth();
 setStats();
+updatePager();
 Promise.all([loadRecentImports(), loadStats()]);

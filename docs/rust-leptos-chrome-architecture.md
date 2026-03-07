@@ -345,3 +345,20 @@ Fluxo:
 3. Usuário clica em **Ouvir** no histórico.
 4. Extensão chama `GET /imports/:id/audio`.
 5. Player reproduz o áudio local.
+
+## 17) Paginação e filtro de histórico
+
+Para escalar o uso com muitos imports:
+
+- `GET /imports` agora aceita:
+  - `limit`
+  - `offset`
+  - `status` (`parsed`, `downloaded`, `failed`)
+- A resposta inclui metadados de paginação:
+  - `total`, `limit`, `offset`, `has_more`
+
+No popup:
+
+- Filtro por status.
+- Botões **Anterior** / **Próxima**.
+- Contagem total coerente com o filtro aplicado.
