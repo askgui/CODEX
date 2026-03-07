@@ -40,20 +40,6 @@ pub struct ImportsListResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct StatsResponse {
-    pub total: i64,
-    pub parsed: i64,
-    pub downloaded: i64,
-    pub failed: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ActionResponse {
-    pub ok: bool,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub service: &'static str,

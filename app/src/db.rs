@@ -15,14 +15,6 @@ pub struct ImportRecord {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct ImportStats {
-    pub total: i64,
-    pub parsed: i64,
-    pub downloaded: i64,
-    pub failed: i64,
-}
-
 fn ensure_column(
     conn: &Connection,
     table: &str,
@@ -186,48 +178,11 @@ pub fn get_import_by_id(db_path: &str, id: i64) -> Result<Option<ImportRecord>, 
     }
 }
 
-pub fn delete_import_by_id(db_path: &str, id: i64) -> Result<bool, rusqlite::Error> {
-    let conn = Connection::open(db_path)?;
-    let changed = conn.execute("DELETE FROM imports WHERE id = ?1", params![id])?;
-    Ok(changed > 0)
-}
-
-pub fn fetch_stats(db_path: &str) -> Result<ImportStats, rusqlite::Error> {
-    let conn = Connection::open(db_path)?;
-
-    let total: i64 = conn.query_row("SELECT COUNT(*) FROM imports", [], |row| row.get(0))?;
-    let parsed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM imports WHERE status = 'parsed'",
-        [],
-        |row| row.get(0),
-    )?;
-    let downloaded: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM imports WHERE status = 'downloaded'",
-        [],
-        |row| row.get(0),
-    )?;
-    let failed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM imports WHERE status = 'failed'",
-        [],
-        |row| row.get(0),
-    )?;
-
-    Ok(ImportStats {
-        total,
-        parsed,
-        downloaded,
-        failed,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{
-        delete_import_by_id, fetch_stats, get_import_by_id, init, list_imports, mark_import_error,
-        upsert_import,
-    };
+    use super::{get_import_by_id, init, list_imports, mark_import_error, upsert_import};
     use crate::models::SongMetadata;
 
     #[test]
@@ -261,11 +216,6 @@ mod tests {
             .expect("get by id")
             .expect("exists");
         assert_eq!(by_id.id, id);
-
-        assert!(delete_import_by_id(&db_path, id).expect("delete by id"));
-        assert!(get_import_by_id(&db_path, id)
-            .expect("check by id")
-            .is_none());
     }
 
     #[test]
@@ -283,9 +233,5 @@ mod tests {
         let rows = list_imports(&db_path, 10).expect("list");
         assert_eq!(rows[0].status, "failed");
         assert_eq!(rows[0].error_message.as_deref(), Some("erro"));
-
-        let stats = fetch_stats(&db_path).expect("stats");
-        assert_eq!(stats.total, 1);
-        assert_eq!(stats.failed, 1);
     }
 }

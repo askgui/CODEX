@@ -4,10 +4,6 @@ const importButton = document.getElementById("import");
 const refreshButton = document.getElementById("refresh");
 const countEl = document.getElementById("count");
 const apiBadgeEl = document.getElementById("api-badge");
-const statTotalEl = document.getElementById("stat-total");
-const statParsedEl = document.getElementById("stat-parsed");
-const statDownloadedEl = document.getElementById("stat-downloaded");
-const statFailedEl = document.getElementById("stat-failed");
 
 function escapeHtml(value) {
   return String(value)
@@ -35,13 +31,6 @@ function setApiBadge(state) {
     apiBadgeEl.classList.add("badge--idle");
     apiBadgeEl.textContent = "API?";
   }
-}
-
-function setStats(stats = {}) {
-  statTotalEl.textContent = String(stats.total || 0);
-  statParsedEl.textContent = String(stats.parsed || 0);
-  statDownloadedEl.textContent = String(stats.downloaded || 0);
-  statFailedEl.textContent = String(stats.failed || 0);
 }
 
 function isValidSunoSongUrl(rawUrl) {
@@ -80,12 +69,7 @@ function renderImports(items) {
     const tag = statusTag(item.status);
     const local = item.local_audio_path ? "🎵" : "";
 
-    li.innerHTML = `
-      <div class="import-item-row">
-        <span class="import-text"><span class="tag ${tag.cls}">${tag.label}</span>${title} ${local}</span>
-        <button class="btn-remove" data-id="${item.id}" title="Remover import">Remover</button>
-      </div>
-    `;
+    li.innerHTML = `<span class="tag ${tag.cls}">${tag.label}</span>${title} ${local}`;
     li.title = `${item.source_url}\n${item.created_at}${item.error_message ? `\nErro: ${item.error_message}` : ""}`;
     importsEl.appendChild(li);
   }
@@ -97,20 +81,6 @@ async function checkHealth() {
     setApiBadge(response.ok ? "ok" : "error");
   } catch {
     setApiBadge("error");
-  }
-}
-
-async function loadStats() {
-  try {
-    const response = await fetch("http://localhost:7878/stats");
-    if (!response.ok) {
-      return;
-    }
-
-    const body = await response.json().catch(() => ({}));
-    setStats(body);
-  } catch {
-    // best effort
   }
 }
 
@@ -137,35 +107,6 @@ async function loadRecentImports() {
     refreshButton.disabled = false;
   }
 }
-
-async function deleteImportById(id) {
-  try {
-    const response = await fetch(`http://localhost:7878/imports/${id}`, { method: "DELETE" });
-    const body = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      setStatus(body.message || "Falha ao remover import.", false);
-      return;
-    }
-
-    setStatus(body.message || "Import removido com sucesso.");
-    await Promise.all([loadRecentImports(), loadStats()]);
-  } catch {
-    setStatus("API local indisponível para remover import.", false);
-  }
-}
-
-importsEl.addEventListener("click", async (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-
-  if (target.classList.contains("btn-remove")) {
-    const id = target.getAttribute("data-id");
-    if (!id) return;
-    target.setAttribute("disabled", "true");
-    await deleteImportById(id);
-  }
-});
 
 importButton.addEventListener("click", async () => {
   importButton.disabled = true;
@@ -195,7 +136,7 @@ importButton.addEventListener("click", async () => {
     if (response.ok) {
       setStatus(body.message || "Importação enviada com sucesso.");
       setApiBadge("ok");
-      await Promise.all([loadRecentImports(), loadStats()]);
+      await loadRecentImports();
     } else {
       setStatus(body.message || "Falha ao importar.", false);
       setApiBadge("error");
@@ -208,10 +149,6 @@ importButton.addEventListener("click", async () => {
   }
 });
 
-refreshButton.addEventListener("click", async () => {
-  await Promise.all([loadRecentImports(), loadStats()]);
-});
-
+refreshButton.addEventListener("click", loadRecentImports);
 checkHealth();
-setStats();
-Promise.all([loadRecentImports(), loadStats()]);
+loadRecentImports();
