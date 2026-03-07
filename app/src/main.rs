@@ -1,4 +1,5 @@
 mod api;
+mod db;
 mod importer;
 mod models;
 
@@ -18,11 +19,15 @@ async fn main() {
         .compact()
         .init();
 
+    let db_path = "music_importer.db".to_string();
+    db::init(&db_path).expect("falha ao inicializar banco SQLite");
+
     let state = AppState {
         http_client: Client::builder()
             .user_agent("music-importer/0.1")
             .build()
             .expect("falha ao criar cliente HTTP"),
+        db_path,
     };
 
     let app = router(state);

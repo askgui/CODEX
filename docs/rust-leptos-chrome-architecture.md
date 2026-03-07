@@ -249,3 +249,29 @@ API disponível em `http://127.0.0.1:7878`.
 3. Extrair áudio/letra por fontes estruturadas (JSON de dados da página).
 4. Fazer download do MP3 e salvar no filesystem.
 5. Expor progresso em tempo real (SSE/WebSocket) para UI Leptos.
+
+
+## 12) Evoluções de robustez implementadas
+
+Nesta fase, o projeto passou a ter uma base mais robusta:
+
+- Persistência SQLite (`music_importer.db`) com tabela `imports`.
+- Endpoint `GET /imports?limit=10` para listar histórico recente.
+- Endpoint `POST /import` agora persiste cada import e retorna `import_id`.
+- Popup da extensão mostra os últimos imports para feedback rápido.
+
+Exemplo de resposta do `POST /import`:
+
+```json
+{
+  "accepted": true,
+  "import_id": 42,
+  "song": {
+    "source_url": "https://suno.com/song/abc123",
+    "title": "Minha Música",
+    "lyrics": null,
+    "audio_url": "https://.../track.mp3"
+  },
+  "message": "Importação iniciada e persistida com sucesso"
+}
+```

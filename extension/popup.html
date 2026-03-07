@@ -4,14 +4,21 @@
     <meta charset="UTF-8" />
     <title>Music Importer</title>
     <style>
-      body { font-family: sans-serif; margin: 16px; width: 280px; }
+      body { font-family: sans-serif; margin: 16px; width: 320px; }
+      .actions { display: grid; gap: 8px; }
       button { width: 100%; padding: 10px; }
       #status { margin-top: 12px; font-size: 13px; }
+      #imports { margin-top: 12px; max-height: 140px; overflow: auto; padding-left: 18px; }
+      #imports li { margin-bottom: 6px; font-size: 12px; }
     </style>
   </head>
   <body>
-    <button id="import">Importar música da aba atual</button>
+    <div class="actions">
+      <button id="import">Importar música da aba atual</button>
+      <button id="refresh" type="button">Atualizar últimos imports</button>
+    </div>
     <p id="status"></p>
+    <ol id="imports"></ol>
     <script src="popup.js"></script>
   </body>
 </html>

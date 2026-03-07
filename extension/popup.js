@@ -1,5 +1,7 @@
 const statusEl = document.getElementById("status");
+const importsEl = document.getElementById("imports");
 const importButton = document.getElementById("import");
+const refreshButton = document.getElementById("refresh");
 
 function setStatus(text, ok = true) {
   statusEl.textContent = text;
@@ -16,7 +18,47 @@ function isValidSunoSongUrl(rawUrl) {
   }
 }
 
-document.getElementById("import").addEventListener("click", async () => {
+function renderImports(items) {
+  importsEl.innerHTML = "";
+
+  if (!items?.length) {
+    const li = document.createElement("li");
+    li.textContent = "Nenhum import registrado ainda.";
+    importsEl.appendChild(li);
+    return;
+  }
+
+  for (const item of items) {
+    const li = document.createElement("li");
+    const title = item.title || "(sem título)";
+    li.textContent = `#${item.id} • ${title}`;
+    li.title = `${item.source_url}\n${item.created_at}`;
+    importsEl.appendChild(li);
+  }
+}
+
+async function loadRecentImports() {
+  refreshButton.disabled = true;
+
+  try {
+    const response = await fetch("http://localhost:7878/imports?limit=10");
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setStatus(body.error || "Falha ao carregar histórico de imports.", false);
+      return;
+    }
+
+    const body = await response.json();
+    renderImports(body.items || []);
+  } catch {
+    setStatus("API local indisponível para listar imports.", false);
+  } finally {
+    refreshButton.disabled = false;
+  }
+}
+
+importButton.addEventListener("click", async () => {
   importButton.disabled = true;
   setStatus("Enviando para API local...");
 
@@ -39,16 +81,20 @@ document.getElementById("import").addEventListener("click", async () => {
       body: JSON.stringify({ url: tab.url })
     });
 
-    const body = await response.json();
+    const body = await response.json().catch(() => ({}));
 
     if (response.ok) {
       setStatus(body.message || "Importação enviada com sucesso.");
+      await loadRecentImports();
     } else {
       setStatus(body.message || "Falha ao importar.", false);
     }
-  } catch (error) {
+  } catch {
     setStatus("API local indisponível. Inicie o app Rust primeiro.", false);
   } finally {
     importButton.disabled = false;
   }
 });
+
+refreshButton.addEventListener("click", loadRecentImports);
+loadRecentImports();
